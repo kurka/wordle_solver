@@ -23,10 +23,12 @@ type Green struct {
 type Yellow struct {
 	letter    rune
 	positions []int
+	quantity  int
 }
 
 type Black struct {
-	letter rune
+	letter    rune
+	tolerance int
 }
 
 // implements sort.Interface for []Tip based on the Tip type.
@@ -37,9 +39,9 @@ func (t ByTipType) Swap(i, j int) { t[i], t[j] = t[j], t[i] }
 
 // Black < Yellow < Green
 func (t ByTipType) Less(i, j int) bool {
-	switch t[i].(type) {
+	switch (t[i]).(type) {
 	case Black:
-		switch t[j].(type) {
+		switch (t[j]).(type) {
 		case Black:
 			return true
 		default:
@@ -47,7 +49,7 @@ func (t ByTipType) Less(i, j int) bool {
 			return false
 		}
 	case Yellow:
-		switch t[j].(type) {
+		switch (t[j]).(type) {
 		case Black:
 			return true
 		case Yellow:
@@ -66,11 +68,11 @@ func (g Green) String() string {
 }
 
 func (y Yellow) String() string {
-	return fmt.Sprintf("Y(%c, %v)", y.letter, y.positions)
+	return fmt.Sprintf("Y(%c, %v, %d)", y.letter, y.positions, y.quantity)
 }
 
 func (b Black) String() string {
-	return fmt.Sprintf("B(%c)", b.letter)
+	return fmt.Sprintf("B(%c, %d)", b.letter, b.tolerance)
 }
 
 func (g Green) rule(word string) bool {
@@ -82,18 +84,28 @@ func (g Green) rule(word string) bool {
 }
 
 func (y Yellow) rule(word string) bool {
+	lettersFound := 0
 	for i, c := range word {
 		if c == y.letter && !containsInt(i, y.positions) {
-			return true
+			lettersFound++
 		}
 	}
-	return false
+	if lettersFound >= y.quantity {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (b Black) rule(word string) bool {
+	patience := b.tolerance
 	for _, c := range word {
 		if c == b.letter {
-			return false
+			if patience > 0 {
+				patience--
+			} else {
+				return false
+			}
 		}
 	}
 	return true
@@ -221,37 +233,95 @@ func processTips(attemptedWord []rune, existingTips []Tip) (tips []Tip) {
 		case '+':
 			newTip = Green{attemptedWord[i], i}
 		case '*':
-			newTip = Yellow{attemptedWord[i], []int{i}}
+			newTip = Yellow{attemptedWord[i], []int{i}, 1}
 		case '-':
-			newTip = Black{attemptedWord[i]}
+			newTip = Black{attemptedWord[i], 0}
 		}
 		newTips = append(newTips, newTip)
 	}
 
+	// merge yellow tips that refer to a same letter (if any)
+	newTipsYellowMerged := []Tip{}
+	for i, newTip := range newTips {
+		if newTipTyped, ok := (newTip).(Yellow); ok {
+			// search in previous tips for similar
+			foundYellow := false
+			for j, prevTip := range newTipsYellowMerged[:i] {
+				if prevTipTyped, ok := prevTip.(Yellow); ok && prevTipTyped.letter == newTipTyped.letter {
+					// merge tips into prevTipTyped
+					prevTipTyped.positions = append(prevTipTyped.positions, newTipTyped.positions...)
+					prevTipTyped.quantity++
+					newTipsYellowMerged[j] = prevTipTyped
+					foundYellow = true
+					break
+				}
+			}
+			if foundYellow {
+				continue
+			}
+		}
+		newTipsYellowMerged = append(newTipsYellowMerged, newTip)
+	}
+
 	// sort so that the list has green > yellow > black elems
-	sort.Sort(ByTipType(newTips))
+	sort.Sort(ByTipType(newTipsYellowMerged))
 
 	// merge new tips with existing tips
 	tips = existingTips
-	for _, newTip := range newTips {
+	for _, newTip := range newTipsYellowMerged {
+		// don't add repeated tips to the list
 		if containsTip(newTip, tips) {
 			continue
 		}
-		switch tip := newTip.(type) {
+		switch tip := (newTip).(type) {
 		case Green:
-			tips = append(tips, tip)
-		case Yellow:
-			tips = append(tips, tip)
-		case Black:
-			// check if list already contains a green with same letter
-			foundGreen := false
-			for _, eTip := range tips {
-				if eTipTyped, ok := eTip.(Green); ok && eTipTyped.letter == tip.letter {
-					foundGreen = true
+			// check if there was an yellow tip that now is green
+			previousYellow := -1
+			for i, eTip := range tips {
+				if eTipTyped, ok := (eTip).(Yellow); ok && eTipTyped.letter == tip.letter {
+					previousYellow = i
+					break
 				}
 			}
-			// just add this rule if green was not found
-			if !foundGreen {
+			// remove previous yellow
+			if previousYellow > -1 {
+				if prevYellow, ok := (tips[previousYellow]).(Yellow); ok && prevYellow.quantity > 1 {
+					// just decrease the quantity of yellow letters
+					(&prevYellow).quantity--
+				} else {
+					// remove the yellow tip altogether
+					tips = append(tips[:previousYellow], tips[previousYellow+1:]...)
+				}
+			}
+			tips = append(tips, newTip)
+		case Yellow:
+			// check if there was an yellow tip for the same letter
+			previousYellow := -1
+			for i, eTip := range tips {
+				if eTipTyped, ok := (eTip).(Yellow); ok && eTipTyped.letter == tip.letter {
+					previousYellow = i
+					break
+				}
+			}
+			// merge previous tip with current, and remove the old one
+			if previousYellow > -1 {
+				if prevYellow, ok := (tips[previousYellow]).(Yellow); ok {
+					(&prevYellow).positions = append(prevYellow.positions, tip.positions...)
+					tips = append(tips[:previousYellow], tips[previousYellow+1:]...)
+				}
+				newTip = tips[previousYellow]
+			}
+			tips = append(tips, newTip)
+		case Black:
+			// check if list already contains a green with same letter
+			tolerance := 0
+			for _, eTip := range tips {
+				if eTipTyped, ok := (eTip).(Green); ok && eTipTyped.letter == tip.letter {
+					tolerance++
+				}
+			}
+			tip.tolerance = tolerance
+			if !containsTip(tip, tips) {
 				tips = append(tips, tip)
 			}
 		}
