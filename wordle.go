@@ -337,8 +337,12 @@ func gameLoop(words *[]string, tips []Tip) (*[]string, []Tip) {
 	filteredWords := applyTips(words, tips)
 	fmt.Printf("Guessing among %d words\n", len(*filteredWords))
 	bestWord := bestScoringWord(filteredWords)
-	fmt.Printf("Try: %s\n", bestWord)
-	tips = processTips([]rune(bestWord), tips)
+	if len(*filteredWords) > 1 {
+		fmt.Printf("Try: %s\n", bestWord)
+		tips = processTips([]rune(bestWord), tips)
+	} else {
+		fmt.Printf("The word is: %s\n", bestWord)
+	}
 	return filteredWords, tips
 }
 
@@ -346,8 +350,7 @@ func main() {
 	words := loadWords()
 	tips := []Tip{}
 	for i := 0; i < 6; i++ {
-		if len(*words) == 0 {
-			fmt.Println("Was that correct?")
+		if len(*words) <= 1 {
 			break
 		}
 		words, tips = gameLoop(words, tips)
