@@ -86,7 +86,10 @@ func (g Green) rule(word string) bool {
 func (y Yellow) rule(word string) bool {
 	lettersFound := 0
 	for i, c := range word {
-		if c == y.letter && !containsInt(i, y.positions) {
+		if c == y.letter {
+			if containsInt(i, y.positions) {
+				return false
+			}
 			lettersFound++
 		}
 	}
